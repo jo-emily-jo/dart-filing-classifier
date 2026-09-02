@@ -76,6 +76,28 @@ def generate(tokenizer, model, device, text):
     return tokenizer.decode(gen, skip_special_tokens=True).strip()
 
 
+def run_model(model_name, device, samples):
+    """model_name을 로드하고 samples 전체를 생성한다. 로드 실패든 생성 중
+    실패든(예: trust_remote_code 커스텀 모델 코드가 설치된 transformers
+    버전과 안 맞는 경우) 그대로 예외를 던진다 — 호출부(main)가 이걸 보고
+    폴백 모델로 통째로 다시 시도한다."""
+    reset_vram_stats(device)
+    t0 = time.time()
+    tokenizer, model = load_model(model_name, device)
+    load_time = time.time() - t0
+    load_vram = vram_gb(device)
+
+    generations = []
+    for r in samples:
+        t0 = time.time()
+        summary = generate(tokenizer, model, device, r["text"])
+        gen_time = time.time() - t0
+        generations.append((r, gen_time, summary))
+        print(f"  {r['corp_name']} 생성 {gen_time:.1f}초")
+
+    return load_time, load_vram, generations
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--out", default="out")
@@ -90,18 +112,12 @@ def main():
     print(f"{TARGET_LABEL} 샘플 {len(samples)}건 선택")
 
     model_name = PRIMARY_MODEL
-    reset_vram_stats(device)
-    t0 = time.time()
     try:
-        tokenizer, model = load_model(model_name, device)
+        load_time, load_vram, generations = run_model(model_name, device, samples)
     except Exception as e:
-        print(f"{PRIMARY_MODEL} 로드 실패({e}) -> {FALLBACK_MODEL}로 폴백")
+        print(f"{PRIMARY_MODEL} 사용 실패({e}) -> {FALLBACK_MODEL}로 폴백")
         model_name = FALLBACK_MODEL
-        reset_vram_stats(device)
-        t0 = time.time()
-        tokenizer, model = load_model(model_name, device)
-    load_time = time.time() - t0
-    load_vram = vram_gb(device)
+        load_time, load_vram, generations = run_model(model_name, device, samples)
 
     vram_str = f"{load_vram:.2f}GB" if load_vram is not None else "측정 불가"
     print(f"모델: {model_name}, 로드시간 {load_time:.1f}초, VRAM {vram_str}")
@@ -117,19 +133,12 @@ def main():
         "| rcept_no | 회사명 | 생성시간(초) |",
         "|---|---|---:|",
     ]
-
-    generations = []
-    for r in samples:
-        t0 = time.time()
-        summary = generate(tokenizer, model, device, r["text"])
-        gen_time = time.time() - t0
+    for r, gen_time, _ in generations:
         lines.append(f"| {r['rcept_no']} | {r['corp_name']} | {gen_time:.1f} |")
-        generations.append((r, summary))
-        print(f"  {r['corp_name']} 생성 {gen_time:.1f}초")
 
     lines.append("")
     lines.append("## 생성 결과")
-    for r, summary in generations:
+    for r, _, summary in generations:
         lines.append("")
         lines.append(f"### {r['corp_name']} ({r['rcept_no']})")
         lines.append("")
