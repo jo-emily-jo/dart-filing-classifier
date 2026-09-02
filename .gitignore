@@ -3,6 +3,7 @@ __pycache__/
 .env
 venv/
 data/*.jsonl
+data.zip
 out/
 out_smoke/
 .ipynb_checkpoints/

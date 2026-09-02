@@ -127,22 +127,32 @@ scikit-learn으로 동일한 지표(accuracy/macro-F1)를 계산한다.
 
 ### 재현 방법 — 학습(Colab)
 
-`notebooks/colab_run.ipynb`을 Colab(GPU 런타임)에서 위에서부터 순서대로
-실행하면 된다: `nvidia-smi` 확인 → 레포 clone → `pip install -r
-requirements-train.txt` → `train.py` → `evaluate.py`+`baseline_keyword.py`
-→ `llm_compare.py`.
+`notebooks/colab_run.ipynb`을 Colab에 업로드해서 위에서부터 순서대로
+실행한다. Drive 마운트는 필요 없다 — 데이터는 로컬 `data.zip`을 Colab
+파일 패널에 직접 올리는 게 제일 빠르다.
 
-로컬에서 직접 돌릴 때:
+1. 런타임 → 런타임 유형 변경 → T4 GPU 선택
+2. `!nvidia-smi`로 T4 잡혔는지 확인 (스크린샷 찍어서 아래에 넣기)
+3. `!git clone https://github.com/jo-emily-jo/dart-filing-classifier && cd dart-filing-classifier`
+4. 로컬에서 `data.zip`(`data/train.jsonl`, `val.jsonl`, `test.jsonl`; `zip -q data.zip data/train.jsonl data/val.jsonl data/test.jsonl`로 생성)을 파일 패널에 업로드 → `!unzip -o data.zip`
+5. `!pip install -r requirements-train.txt`
+6. `!python train.py --fp16 --epochs 3 --out out`
+7. `!python evaluate.py`
+8. `!python baseline_keyword.py`
+9. `!python llm_compare.py`
+
+**T4 확인 스크린샷:** _(여기에 nvidia-smi 출력 스크린샷 추가)_
+
+로컬(mps/cpu)에서 코드 경로만 확인할 때는 `--smoke`를 쓴다(정식 학습은
+위 Colab 순서대로):
 
 ```bash
 python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt -r requirements-train.txt
-python train.py --smoke              # 로컬 mps/cpu: 코드 경로 확인용
-python train.py --epochs 3 --fp16    # Colab cuda: 정식 학습
-python evaluate.py
+python train.py --smoke   # 32건·1epoch, 코드 경로 확인용
+python evaluate.py --model_dir out/best_model
 python baseline_keyword.py
 python predict.py <rcept_no>
-python llm_compare.py                # Colab 권장(2.4B 모델 다운로드/추론)
 ```
 
 ### 결과 (TBD — Colab 정식 학습 후 채울 것)
