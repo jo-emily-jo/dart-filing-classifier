@@ -141,7 +141,9 @@ scikit-learn으로 동일한 지표(accuracy/macro-F1)를 계산한다.
 8. `!python baseline_keyword.py`
 9. `!python llm_compare.py`
 
-**T4 확인 스크린샷:** _(여기에 nvidia-smi 출력 스크린샷 추가)_
+**T4 확인 스크린샷:**
+
+![nvidia-smi에서 Tesla T4 확인](docs/nvidia-smi-t4.png)
 
 로컬(mps/cpu)에서 코드 경로만 확인할 때는 `--smoke`를 쓴다(정식 학습은
 위 Colab 순서대로):
