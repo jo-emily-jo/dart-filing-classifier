@@ -20,11 +20,30 @@ def load_jsonl(path):
 
 def setup_korean_font():
     """matplotlib에 한글 폰트가 있으면 적용(없으면 조용히 넘어감 — 글자가
-    네모로 깨져도 학습/평가 로직에는 영향 없음)."""
+    네모로 깨져도 학습/평가 로직에는 영향 없음).
+
+    `apt-get install fonts-nanum` 직후에도 matplotlib이 이전에 캐싱해둔
+    폰트 목록(fontlist-*.json)만 보고 새로 깔린 폰트를 못 잡는 경우가
+    있어서, 흔한 설치 경로의 ttf 파일을 직접 addfont()로 등록해 그 캐시
+    문제를 우회한다."""
+    import glob
     import matplotlib.font_manager as fm
     import matplotlib.pyplot as plt
 
     candidates = ("AppleGothic", "NanumGothic", "Malgun Gothic", "NanumBarunGothic")
+
+    font_glob_patterns = (
+        "/usr/share/fonts/**/Nanum*.ttf",
+        "/usr/share/fonts/**/Nanum*.otf",
+        "/usr/local/share/fonts/**/Nanum*.ttf",
+    )
+    for pattern in font_glob_patterns:
+        for path in glob.glob(pattern, recursive=True):
+            try:
+                fm.fontManager.addfont(path)
+            except Exception:
+                pass
+
     available = {f.name for f in fm.fontManager.ttflist}
     for cand in candidates:
         if cand in available:
