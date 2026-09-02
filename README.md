@@ -141,9 +141,12 @@ scikit-learn으로 동일한 지표(accuracy/macro-F1)를 계산한다.
    Trainer`가 죽는다. 혹시 이전에 torch를 따로 설치해서 이미 깨졌다면
    `!pip uninstall -y torchvision torchaudio -q`로 복구)
 6. `!python train.py --fp16 --epochs 3 --out out`
-7. `!python evaluate.py`
-8. `!python baseline_keyword.py`
-9. `!python llm_compare.py`
+7. (선택) `!apt-get -qq install -y fonts-nanum`로 한글 폰트를 깔면
+   `confusion.png` 라벨이 네모로 안 깨진다 — 안 깔아도 `evaluate.py`
+   자체는 정상 동작(수치는 영향 없음, 그림 폰트만 다름)
+8. `!python evaluate.py`
+9. `!python baseline_keyword.py`
+10. `!python llm_compare.py`
 
 **T4 확인 스크린샷:**
 
