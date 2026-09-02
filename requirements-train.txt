@@ -1,4 +1,8 @@
-torch==2.13.0
+# torch는 일부러 안 넣는다: Colab은 이미 GPU/CUDA에 맞게 짝지어진
+# torch+torchvision+torchaudio가 깔려있는데, 여기서 다른 torch 버전을
+# 강제로 설치하면 그 짝이 깨져서 transformers import 자체가 실패한다
+# (torchvision::nms / CUDA 버전 불일치 에러). 로컬(Mac 등)에서 새로
+# venv를 만들 때만 별도로 `pip install torch`를 실행할 것.
 transformers==5.16.1
 datasets==5.0.1
 scikit-learn==1.9.0

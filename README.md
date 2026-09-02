@@ -135,7 +135,11 @@ scikit-learn으로 동일한 지표(accuracy/macro-F1)를 계산한다.
 2. `!nvidia-smi`로 T4 잡혔는지 확인 (스크린샷 찍어서 아래에 넣기)
 3. `!git clone https://github.com/jo-emily-jo/dart-filing-classifier && cd dart-filing-classifier`
 4. 로컬에서 `data.zip`(`data/train.jsonl`, `val.jsonl`, `test.jsonl`; `zip -q data.zip data/train.jsonl data/val.jsonl data/test.jsonl`로 생성)을 파일 패널에 업로드 → `!unzip -o data.zip`
-5. `!pip install -r requirements-train.txt`
+5. `!pip install -r requirements-train.txt` (torch는 Colab에 이미 GPU에
+   맞게 깔려있어서 일부러 이 파일에 안 넣었다 — 여기서 다른 torch를
+   깔면 torchvision/torchaudio 짝이 깨져서 `from transformers import
+   Trainer`가 죽는다. 혹시 이전에 torch를 따로 설치해서 이미 깨졌다면
+   `!pip uninstall -y torchvision torchaudio -q`로 복구)
 6. `!python train.py --fp16 --epochs 3 --out out`
 7. `!python evaluate.py`
 8. `!python baseline_keyword.py`
@@ -150,6 +154,7 @@ scikit-learn으로 동일한 지표(accuracy/macro-F1)를 계산한다.
 
 ```bash
 python3 -m venv venv && source venv/bin/activate
+pip install torch   # 로컬은 Colab과 달리 torch가 없으니 따로 설치
 pip install -r requirements.txt -r requirements-train.txt
 python train.py --smoke   # 32건·1epoch, 코드 경로 확인용
 python evaluate.py --model_dir out/best_model
