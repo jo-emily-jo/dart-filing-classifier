@@ -3,3 +3,7 @@ __pycache__/
 .env
 venv/
 data/*.jsonl
+out/
+out_smoke/
+.ipynb_checkpoints/
+.DS_Store

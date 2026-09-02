@@ -1,7 +1,9 @@
 # dart-filing-classifier
 
-DART(전자공시) 공시 **본문 텍스트 → 공시 유형(라벨)** 분류 모델을 위한 데이터셋
-빌더. `dart-alert-bot`에서 분리해 나온 독립 프로젝트다(이 폴더는
+DART(전자공시) 공시 **본문 텍스트 → 공시 유형(라벨)** 분류기. 데이터셋
+빌더(`build_dataset.py`/`split.py`)와 `klue/roberta-base` 파인튜닝 파이프라인
+(`train.py`/`evaluate.py`/`baseline_keyword.py`/`predict.py`/`llm_compare.py`)
+으로 구성된다. `dart-alert-bot`에서 분리해 나온 독립 프로젝트다(이 폴더는
 `dart_alert_bot.py`/`lead_radar.py`를 import하지 않는다 — 필요한 DART 호출
 로직은 `dart_io.py`에 자체 복사되어 있다).
 
@@ -67,12 +69,13 @@ DART(전자공시) 공시 **본문 텍스트 → 공시 유형(라벨)** 분류 
   그룹 누출 0건 (자세한 라벨별 분할 수는 `data/split_stats.md` 참고).
 - 자세한 라벨별 통계는 `data/stats.md` 참고.
 
-## 재현 방법
+## 재현 방법 — 데이터셋
 
 ```bash
+pip install -r requirements.txt
 # .env에 DART_API_KEY 필요 (OpenDART 발급키)
-python build_dataset.py   # classifier/data/filings.jsonl, stats.md 생성
-python split.py            # train/val/test.jsonl, split_stats.md 생성
+python build_dataset.py   # data/filings.jsonl, stats.md 생성
+python split.py            # data/train.jsonl, val.jsonl, test.jsonl, split_stats.md 생성
 python labels.py -v         # normalize_label() 유닛테스트
 ```
 
@@ -99,3 +102,71 @@ python labels.py -v         # normalize_label() 유닛테스트
 - 라벨별 최대 250건, `rcept_dt` 기준으로 고르게 뽑는다(균등 인덱스 샘플링).
 - 한 회사(`corp_code`)가 라벨의 20%(최대 50건)를 넘지 못하게 캡.
 - 본문 300자 미만이면 버린다(원문 조회 실패 포함).
+
+## 학습 파이프라인
+
+`klue/roberta-base`를 8라벨 분류로 파인튜닝한다. Colab T4(cuda)에서 정식
+학습을 돌리고, 로컬에서는 `--smoke`로 32건·1epoch만 실행해 코드 경로만
+확인한다(디바이스는 `cuda > mps > cpu` 순 자동 선택, mps/cpu에서도 --smoke
+없이 그대로 도는 코드다 — 느릴 뿐이다). 로컬 macOS(M-series, mps)에서
+`train.py --smoke` → `evaluate.py` → `baseline_keyword.py` → `predict.py`
+전체 경로를 실제로 실행해 확인했다(아래 "로컬 스모크 실행 로그" 참고).
+
+| 파일 | 역할 |
+|---|---|
+| `train.py` | 파인튜닝. best 체크포인트(`out/best_model`)와 학습곡선(`out/curves.png`) 저장 |
+| `evaluate.py` | test셋 accuracy/macro-F1/라벨별 precision·recall, confusion matrix(`out/confusion.png`) → `out/metrics.json` |
+| `baseline_keyword.py` | `dart_alert_bot.py`의 제목 키워드 7종을 본문에 적용한 규칙 베이스라인 + "제목 필터가 자율공시·주요사항보고서(전체) 라벨 안의 공급계약성 공시를 얼마나 놓쳤을지" 계산. 같은 `out/metrics.json`에 병합 |
+| `predict.py` | `rcept_no` 하나를 받아 본문을 크롤링해 라벨 top-3 확률 출력 |
+| `llm_compare.py` | EXAONE-3.5-2.4B-Instruct(실패 시 Qwen2.5-1.5B-Instruct)로 공급계약 공시 5건을 3줄 요약, 로드시간/VRAM/생성시간을 `out/llm_compare.md`에 기록. 무거운 생성형 비교라 Colab 전용(로컬 스모크 대상 아님) |
+
+`evaluate` 라이브러리는 쓰지 않는다 — 평가 스크립트 파일명이 `evaluate.py`라서
+같은 폴더에서 `import evaluate`를 하면 pip 패키지 대신 이 파일 자신이
+잡히기 때문에(스크립트 실행 시 그 디렉터리가 `sys.path[0]`이 됨), 대신
+scikit-learn으로 동일한 지표(accuracy/macro-F1)를 계산한다.
+
+### 재현 방법 — 학습(Colab)
+
+`notebooks/colab_run.ipynb`을 Colab(GPU 런타임)에서 위에서부터 순서대로
+실행하면 된다: `nvidia-smi` 확인 → 레포 clone → `pip install -r
+requirements-train.txt` → `train.py` → `evaluate.py`+`baseline_keyword.py`
+→ `llm_compare.py`.
+
+로컬에서 직접 돌릴 때:
+
+```bash
+python3 -m venv venv && source venv/bin/activate
+pip install -r requirements.txt -r requirements-train.txt
+python train.py --smoke              # 로컬 mps/cpu: 코드 경로 확인용
+python train.py --epochs 3 --fp16    # Colab cuda: 정식 학습
+python evaluate.py
+python baseline_keyword.py
+python predict.py <rcept_no>
+python llm_compare.py                # Colab 권장(2.4B 모델 다운로드/추론)
+```
+
+### 결과 (TBD — Colab 정식 학습 후 채울 것)
+
+| 모델 | GPU | 학습시간 | macro-F1 | 키워드 베이스라인 macro-F1 |
+|---|---|---:|---:|---:|
+| klue/roberta-base | T4 | - | - | - |
+
+- 라벨별 precision/recall, confusion matrix: `out/metrics.json`, `out/confusion.png`
+- "제목 키워드 필터가 놓쳤을 비율": `out/metrics.json`의 `title_keyword_filter_miss`
+- LLM 요약 비교(로드시간/VRAM/생성시간): `out/llm_compare.md`
+
+### 로컬 스모크 실행 로그 (2026-09-02, MacBook Air M-series, mps)
+
+- `train.py --smoke`: train/val/test 각 32건, 1epoch, 약 6~7분(모델 최초
+  다운로드 포함 시 더 오래 걸림). `out/best_model`, `out/curves.png` 정상 저장.
+- `evaluate.py`: 정상 실행 (32건짜리 스모크 모델이라 accuracy≈0.03으로
+  낮음 — 예상된 결과, 코드 경로 확인이 목적).
+- `baseline_keyword.py`: 정상 실행. 스모크 test 150건 기준 본문 키워드
+  규칙 베이스라인 accuracy=0.393, macro_f1=0.351이었고, "주요사항보고서
+  (전체)" 라벨 23건 중 4건(17.4%)이 본문에 공급계약 신호를 갖고 있어
+  제목 키워드 필터였다면 완전히 놓쳤을 것으로 확인됨(이 프로젝트의
+  동기를 데이터로 뒷받침).
+- `predict.py`: 실제 rcept_no로 DART 원문을 크롤링해 top-3 라벨 확률 출력
+  정상 동작 확인.
+- `llm_compare.py`: 구문 검사·import만 확인(2.4B 모델 다운로드는 로컬
+  디스크/시간 제약으로 스킵 — Colab에서 실행 권장).
