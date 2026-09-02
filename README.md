@@ -1,56 +1,62 @@
 # dart-filing-classifier
 
-DART(전자공시) 공시 **본문 텍스트 → 공시 유형(라벨)** 분류기. 데이터셋
-빌더(`build_dataset.py`/`split.py`)와 `klue/roberta-base` 파인튜닝 파이프라인
-(`train.py`/`evaluate.py`/`baseline_keyword.py`/`predict.py`/`llm_compare.py`)
-으로 구성된다. `dart-alert-bot`에서 분리해 나온 독립 프로젝트다(이 폴더는
-`dart_alert_bot.py`/`lead_radar.py`를 import하지 않는다 — 필요한 DART 호출
-로직은 `dart_io.py`에 자체 복사되어 있다).
+A classifier that maps DART (Korea's electronic disclosure system) filing
+**body text → filing type (label)**. Consists of a dataset builder
+(`build_dataset.py`/`split.py`) and a `klue/roberta-base` fine-tuning
+pipeline (`train.py`/`evaluate.py`/`baseline_keyword.py`/`predict.py`/
+`llm_compare.py`). Split out as an independent project from `dart-alert-bot`
+(this repo does not import `dart_alert_bot.py`/`lead_radar.py` — the DART
+API logic it needs is copied into its own `dart_io.py`).
 
-## 왜 만들었나
+## Why this exists
 
-`dart-alert-bot`은 `report_nm`(공시 제목) 키워드 매칭으로 알림 대상을
-고른다. 이 방식은 제목이 정형화된 "단일판매·공급계약체결", "유상증자결정"
-같은 유형은 잘 잡지만, **제목만으로는 성격을 알기 어려운 유형**—특히
-"기타경영사항(자율공시)"나 "주요사항보고서" 하위 다양한 결정사항—은
-키워드 필터를 계속 늘려도 놓치거나 오탐이 난다. 본문을 읽고 유형을
-분류하는 모델이 있으면 제목 키워드에 의존하지 않고 더 일반적으로 공시를
-분류/필터링할 수 있다.
+`dart-alert-bot` picks alert targets by keyword-matching on `report_nm`
+(the filing title). That works well for filing types with a standardized
+title — "단일판매·공급계약체결" (supply contract), "유상증자결정" (capital
+increase) — but **filing types whose nature isn't obvious from the title
+alone** — especially "기타경영사항(자율공시)" (voluntary disclosure) and the
+many subtypes under "주요사항보고서" (material fact report) — keep getting
+missed or false-matched no matter how many keywords you add. A model that
+reads the body and classifies the type can filter/classify filings more
+generally, without depending on title keywords.
 
-## 라벨 (8종)
+## Labels (8)
 
-| 라벨 | 비고 |
+| Label | Note |
 |---|---|
-| 단일판매ㆍ공급계약체결 | 공급계약/수주 공시 |
-| 유상증자결정 | |
-| 타법인주식및출자증권취득결정 | |
-| 신규시설투자등 | |
-| 자기주식취득결정 | |
-| 주요사항보고서(전체) | 위 4종 외 "주요사항보고서(...)" 하위유형을 모두 묶은 catch-all (예: 전환사채권발행결정, 유형자산양수결정 등) |
-| 기타경영사항(자율공시) | |
-| 주식등의대량보유상황보고서 | 5% 보고 |
+| 단일판매ㆍ공급계약체결 | single-sale/supply contract |
+| 유상증자결정 | paid-in capital increase |
+| 타법인주식및출자증권취득결정 | acquisition of another company's shares/equity |
+| 신규시설투자등 | new facility investment |
+| 자기주식취득결정 | treasury stock acquisition |
+| 주요사항보고서(전체) | catch-all for every "주요사항보고서(...)" subtype other than the 4 above (e.g. convertible bond issuance, tangible asset acquisition) |
+| 기타경영사항(자율공시) | other management matters (voluntary disclosure) |
+| 주식등의대량보유상황보고서 | 5%-ownership report |
 
-라벨은 `report_nm`(공시 제목)에서 결정론적으로 유도한다. 정정공시 접두
-(`[기재정정]` 등), 공백, 문장부호(가운뎃점 변형) 차이를 흡수하고,
-"주요사항보고서(유상증자결정)"처럼 래핑된 제목과 "유상증자결정"처럼
-단독으로 나오는 제목을 같은 라벨로 합친다. 규칙은 `labels.py`의
-`normalize_label()` 하나에 모아뒀고, 대표 케이스 5개에 대한 유닛테스트가
-같은 파일에 있다(`python labels.py`로 실행).
+Labels are derived deterministically from `report_nm` (the filing title).
+The normalization absorbs amendment prefixes (`[기재정정]` etc.), whitespace,
+and punctuation variants (middle-dot forms), and merges a title wrapped as
+"주요사항보고서(유상증자결정)" with the same title appearing bare as
+"유상증자결정" into one label. The rule lives in a single function,
+`normalize_label()` in `labels.py`, with 5 unit tests covering the
+representative cases in the same file (run with `python labels.py -v`).
 
-## 라벨 누출(leakage) 방지
+## Label leakage prevention
 
-공시 본문은 첫 줄(또는 첫 문단)에 제목을 그대로 반복하는 경우가 많다
-(예: `단일판매ㆍ공급계약체결\n1. 판매ㆍ공급계약 내용...`). 이걸 그대로
-학습에 쓰면 모델이 본문 내용이 아니라 "첫 줄에 라벨 문자열이 있는지"만
-배우게 된다. `build_dataset.py`의 `strip_leaked_title_line()`이 본문의
-첫 줄을 검사해서, 원제목(괄호 앞부분 포함)이나 정규화된 라벨 문자열이
-그대로 들어 있으면 그 줄을 제거한다.
+Filing bodies often repeat the title verbatim in the first line (or
+paragraph) — e.g. `단일판매ㆍ공급계약체결\n1. 판매ㆍ공급계약 내용...`. Training
+on that as-is would let the model learn "does the first line contain the
+label string" instead of the actual content. `build_dataset.py`'s
+`strip_leaked_title_line()` inspects the body's first line and removes it
+if it contains the original title (including the pre-parenthesis part) or
+the normalized label string verbatim.
 
-## 데이터 통계
+## Dataset stats
 
-2026-09-02 최근 90일 기준 실행 결과 (총 1,500건, API 호출 2,113회, 약 16분):
+Run on 2026-09-02 over the most recent 90 days (1,500 filings total, 2,113
+API calls, ~16 minutes):
 
-| 라벨 | 건수 | 평균 길이(자) | 버림(짧음/원문실패) |
+| Label | Count | Avg length (chars) | Dropped (too short / fetch failed) |
 |---|---:|---:|---:|
 | 단일판매ㆍ공급계약체결 | 250 | 886 | 0 / 0 |
 | 유상증자결정 | 247 | 1416 | 0 / 3 |
@@ -61,123 +67,138 @@ DART(전자공시) 공시 **본문 텍스트 → 공시 유형(라벨)** 분류�
 | 기타경영사항(자율공시) | 40 | 650 | 29 / 0 |
 | 주식등의대량보유상황보고서 | 250 | 1500 | 0 / 0 |
 
-- 신규시설투자등/자기주식취득결정/기타경영사항(자율공시)은 250건에 못
-  미친다 — 최근 90일 안에 실제로 그만큼 없었거나(자기주식취득결정은
-  corp_code 20% 캡에도 걸림), 기타경영사항(자율공시)은 본문이 짧아
-  300자 미만으로 버려진 건이 많았다(29건 버림/후보 69건 중).
-- train/val/test = 1199/151/150, 라벨별 비율도 80/10/10에 근접, corp
-  그룹 누출 0건 (자세한 라벨별 분할 수는 `data/split_stats.md` 참고).
-- 자세한 라벨별 통계는 `data/stats.md` 참고.
+- 신규시설투자등/자기주식취득결정/기타경영사항(자율공시) fall short of 250 —
+  either there genuinely weren't that many in the last 90 days
+  (자기주식취득결정 also hit the corp_code 20% cap), or in the case of
+  기타경영사항(자율공시) many bodies were too short and got dropped (29
+  dropped out of 69 candidates).
+- train/val/test = 1199/151/150, per-label ratios close to 80/10/10, zero
+  corp-group leakage (see `data/split_stats.md` for the per-label split
+  breakdown).
+- Full per-label stats: `data/stats.md`.
 
-## 재현 방법 — 데이터셋
+## Reproducing — dataset
 
 ```bash
 pip install -r requirements.txt
-# .env에 DART_API_KEY 필요 (OpenDART 발급키)
-python build_dataset.py   # data/filings.jsonl, stats.md 생성
-python split.py            # data/train.jsonl, val.jsonl, test.jsonl, split_stats.md 생성
-python labels.py -v         # normalize_label() 유닛테스트
+# needs DART_API_KEY in .env (issued via OpenDART)
+python build_dataset.py   # produces data/filings.jsonl, stats.md
+python split.py            # produces data/train.jsonl, val.jsonl, test.jsonl, split_stats.md
+python labels.py -v         # normalize_label() unit tests
 ```
 
-`data/*.jsonl`은 커밋하지 않는다(DART 공시 원문 재배포 이슈). 위 스크립트로
-언제든 재현 가능하다.
+`data/*.jsonl` is not committed (DART filing-text redistribution concern).
+It's always reproducible via the scripts above.
 
-## 데이터 스키마
+## Data schema
 
-`filings.jsonl` (한 줄 = 한 공시):
+`filings.jsonl` (one line = one filing):
 
 ```json
 {
   "rcept_no": "20260828900123",
-  "corp_name": "회사명",
+  "corp_name": "company name",
   "rcept_dt": "20260828",
   "label": "단일판매ㆍ공급계약체결",
-  "text": "본문 앞부분 최대 1500자 (제목 노출 첫 줄 제거됨)"
+  "text": "first up to 1,500 chars of the body (leaked title line stripped)"
 }
 ```
 
-## 샘플링 방법
+## Sampling method
 
-- 최근 90일을 7일 단위로 나눠 `list.json`을 페이지 끝까지 순회.
-- 라벨별 최대 250건, `rcept_dt` 기준으로 고르게 뽑는다(균등 인덱스 샘플링).
-- 한 회사(`corp_code`)가 라벨의 20%(최대 50건)를 넘지 못하게 캡.
-- 본문 300자 미만이면 버린다(원문 조회 실패 포함).
+- Walk `list.json` to the last page over 7-day windows across the last 90 days.
+- Up to 250 filings per label, sampled evenly by `rcept_dt` (evenly spaced
+  index sampling).
+- Cap: a single company (`corp_code`) can't exceed 20% (max 50) of a
+  label's quota.
+- Drop any filing whose body is under 300 characters (including fetch
+  failures).
 
-## 학습 파이프라인
+## Training pipeline
 
-`klue/roberta-base`를 8라벨 분류로 파인튜닝한다. Colab T4(cuda)에서 정식
-학습을 돌리고, 로컬에서는 `--smoke`로 32건·1epoch만 실행해 코드 경로만
-확인한다(디바이스는 `cuda > mps > cpu` 순 자동 선택, mps/cpu에서도 --smoke
-없이 그대로 도는 코드다 — 느릴 뿐이다). 로컬 macOS(M-series, mps)에서
-`train.py --smoke` → `evaluate.py` → `baseline_keyword.py` → `predict.py`
-전체 경로를 실제로 실행해 확인했다(아래 "로컬 스모크 실행 로그" 참고).
+Fine-tunes `klue/roberta-base` for 8-label classification. Full training
+runs on a Colab T4 (cuda); locally, `--smoke` runs just 32 examples for 1
+epoch to verify the code path only (device auto-selects `cuda > mps > cpu`,
+and the code runs fine on mps/cpu without `--smoke` too — just slowly). The
+full local path `train.py --smoke` → `evaluate.py` → `baseline_keyword.py`
+→ `predict.py` was actually run and verified on a local macOS machine
+(M-series, mps) — see "Local smoke-test log" below.
 
-| 파일 | 역할 |
+| File | Role |
 |---|---|
-| `train.py` | 파인튜닝. best 체크포인트(`out/best_model`)와 학습곡선(`out/curves.png`) 저장 |
-| `evaluate.py` | test셋 accuracy/macro-F1/라벨별 precision·recall, confusion matrix(`out/confusion.png`) → `out/metrics.json` |
-| `baseline_keyword.py` | `dart_alert_bot.py`의 제목 키워드 7종을 본문에 적용한 규칙 베이스라인 + "제목 필터가 자율공시·주요사항보고서(전체) 라벨 안의 공급계약성 공시를 얼마나 놓쳤을지" 계산. 같은 `out/metrics.json`에 병합 |
-| `predict.py` | `rcept_no` 하나를 받아 본문을 크롤링해 라벨 top-3 확률 출력 |
-| `llm_compare.py` | EXAONE-3.5-2.4B-Instruct(실패 시 Qwen2.5-1.5B-Instruct)로 공급계약 공시 5건을 3줄 요약, 로드시간/VRAM/생성시간을 `out/llm_compare.md`에 기록. 무거운 생성형 비교라 Colab 전용(로컬 스모크 대상 아님) |
+| `train.py` | Fine-tuning. Saves the best checkpoint (`out/best_model`) and the training curves (`out/curves.png`) |
+| `evaluate.py` | test-set accuracy/macro-F1/per-label precision & recall, confusion matrix (`out/confusion.png`) → `out/metrics.json` |
+| `baseline_keyword.py` | A rule-based baseline applying `dart_alert_bot.py`'s 7 title keywords to the body text, plus a calculation of how much a title-only filter would have missed within the 자율공시/주요사항보고서(전체) labels. Merges into the same `out/metrics.json` |
+| `predict.py` | Takes one `rcept_no`, crawls the body, and prints the top-3 predicted labels with probabilities |
+| `llm_compare.py` | Summarizes 5 supply-contract filings in 3 lines using EXAONE-3.5-2.4B-Instruct (falls back to Qwen2.5-1.5B-Instruct on failure), logging load time/VRAM/generation time to `out/llm_compare.md`. A heavy generative comparison meant for Colab (not part of the local smoke test) |
 
-`evaluate` 라이브러리는 쓰지 않는다 — 평가 스크립트 파일명이 `evaluate.py`라서
-같은 폴더에서 `import evaluate`를 하면 pip 패키지 대신 이 파일 자신이
-잡히기 때문에(스크립트 실행 시 그 디렉터리가 `sys.path[0]`이 됨), 대신
-scikit-learn으로 동일한 지표(accuracy/macro-F1)를 계산한다.
+The `evaluate` pip library is intentionally unused — since the evaluation
+script is named `evaluate.py`, `import evaluate` from anywhere in this
+directory would resolve to that file instead of the pip package (the
+script's own directory becomes `sys.path[0]`). scikit-learn is used
+instead to compute the same metrics (accuracy/macro-F1).
 
-### 재현 방법 — 학습(Colab)
+### Reproducing — training (Colab)
 
-`notebooks/colab_run.ipynb`을 Colab에 업로드해서 위에서부터 순서대로
-실행한다. Drive 마운트는 필요 없다 — 데이터는 로컬 `data.zip`을 Colab
-파일 패널에 직접 올리는 게 제일 빠르다.
+Upload `notebooks/colab_run.ipynb` to Colab and run the cells top to
+bottom. No Drive mount needed — the fastest way to get the data in is to
+zip it locally and drag it straight into Colab's file panel.
 
-1. 런타임 → 런타임 유형 변경 → T4 GPU 선택
-2. `!nvidia-smi`로 T4 잡혔는지 확인 (스크린샷 찍어서 아래에 넣기)
+1. Runtime → Change runtime type → select T4 GPU
+2. `!nvidia-smi` to confirm the T4 is attached (screenshot below)
 3. `!git clone https://github.com/jo-emily-jo/dart-filing-classifier && cd dart-filing-classifier`
-4. 로컬에서 `data.zip`(`data/train.jsonl`, `val.jsonl`, `test.jsonl`; `zip -q data.zip data/train.jsonl data/val.jsonl data/test.jsonl`로 생성)을 파일 패널에 업로드 → `!unzip -o data.zip`
-5. `!pip install -r requirements-train.txt` (torch는 Colab에 이미 GPU에
-   맞게 깔려있어서 일부러 이 파일에 안 넣었다 — 여기서 다른 torch를
-   깔면 torchvision/torchaudio 짝이 깨져서 `from transformers import
-   Trainer`가 죽는다. 혹시 이전에 torch를 따로 설치해서 이미 깨졌다면
-   `!pip uninstall -y torchvision torchaudio -q`로 복구)
+4. Build `data.zip` locally (`data/train.jsonl`, `val.jsonl`, `test.jsonl`;
+   `zip -q data.zip data/train.jsonl data/val.jsonl data/test.jsonl`),
+   upload it via the file panel, then `!unzip -o data.zip`
+5. `!pip install -r requirements-train.txt` (torch is deliberately left
+   out of this file — Colab already ships one matched to its GPU/CUDA.
+   Installing a different torch here breaks the torchvision/torchaudio
+   pairing and crashes `from transformers import Trainer`. If you already
+   broke it by installing torch separately, recover with
+   `!pip uninstall -y torchvision torchaudio -q`)
 6. `!python train.py --fp16 --epochs 3 --out out`
-7. (선택) `!apt-get -qq install -y fonts-nanum`로 한글 폰트를 깔면
-   `confusion.png` 라벨이 네모로 안 깨진다 — 안 깔아도 `evaluate.py`
-   자체는 정상 동작(수치는 영향 없음, 그림 폰트만 다름)
+7. (optional) `!apt-get -qq install -y fonts-nanum` installs a Korean
+   font so `confusion.png` labels don't render as tofu boxes — skipping
+   this doesn't affect `evaluate.py`'s actual numbers, just the plot font
 8. `!python evaluate.py`
 9. `!python baseline_keyword.py`
 10. `!python llm_compare.py`
 
-**T4 확인 스크린샷:**
+**T4 confirmation screenshot:**
 
-![nvidia-smi에서 Tesla T4 확인](docs/nvidia-smi-t4.png)
+![nvidia-smi confirming a Tesla T4](docs/nvidia-smi-t4.png)
 
-로컬(mps/cpu)에서 코드 경로만 확인할 때는 `--smoke`를 쓴다(정식 학습은
-위 Colab 순서대로):
+To just verify the code path locally (mps/cpu) — use `--smoke` (full
+training follows the Colab steps above):
 
 ```bash
 python3 -m venv venv && source venv/bin/activate
-pip install torch   # 로컬은 Colab과 달리 torch가 없으니 따로 설치
+pip install torch   # unlike Colab, torch isn't preinstalled locally
 pip install -r requirements.txt -r requirements-train.txt
-python train.py --smoke   # 32건·1epoch, 코드 경로 확인용
+python train.py --smoke   # 32 examples, 1 epoch, code-path check only
 python evaluate.py --model_dir out/best_model
 python baseline_keyword.py
 python predict.py <rcept_no>
 ```
 
-### 결과 (2026-09-02, Colab T4, `train.py --fp16 --epochs 3 --out out`)
+### Results (2026-09-02, Colab T4, `train.py --fp16 --epochs 3 --out out`)
 
-| 모델 | GPU | 학습시간 | test accuracy | test macro-F1 | 키워드 베이스라인 macro-F1 |
+| Model | GPU | Training time | Test accuracy | Test macro-F1 | Keyword baseline macro-F1 |
 |---|---|---:|---:|---:|---:|
-| klue/roberta-base | T4 | 122.6초 (3epoch) | 0.9867 | 0.9895 | 0.3511 |
+| klue/roberta-base | T4 | 122.6s (3 epochs) | 0.9867 | 0.9895 | 0.3511 |
 
-키워드 베이스라인(제목용 키워드 7종을 본문에 적용)은 accuracy 0.3933,
-macro-F1 0.3511로 파인튜닝 모델과 큰 격차가 난다 — test 150건 중 67건만
-매칭됐다(나머지는 애초에 판단 불가).
+Training curves:
 
-라벨별 precision/recall/f1 (test, n=150):
+![Training loss and validation macro-F1 per epoch](docs/curves.png)
 
-| 라벨 | precision | recall | f1 | support |
+The keyword baseline (the 7 title keywords applied to the body) scores
+accuracy 0.3933, macro-F1 0.3511 — a huge gap versus the fine-tuned model.
+Only 67 of the 150 test filings matched any keyword at all (the rest
+weren't even classifiable by this method).
+
+Per-label precision/recall/f1 (test, n=150):
+
+| Label | precision | recall | f1 | support |
 |---|---:|---:|---:|---:|
 | 단일판매ㆍ공급계약체결 | 1.000 | 1.000 | 1.000 | 25 |
 | 유상증자결정 | 0.926 | 1.000 | 0.962 | 25 |
@@ -188,49 +209,59 @@ macro-F1 0.3511로 파인튜닝 모델과 큰 격차가 난다 — test 150건 �
 | 기타경영사항(자율공시) | 1.000 | 1.000 | 1.000 | 4 |
 | 주식등의대량보유상황보고서 | 1.000 | 1.000 | 1.000 | 25 |
 
-유일하게 밀리는 두 라벨(유상증자결정 precision 0.926, 주요사항보고서
-(전체) recall 0.913)은 서로 헷갈린 것으로 보인다 — "주요사항보고서(전체)"
-가 유상증자결정을 포함해 다양한 하위유형을 뭉친 catch-all이라 일부
-유상증자 관련 문서와 경계가 흐릿한 게 원인으로 추정된다(라벨 정의상
-불가피한 중첩). confusion matrix는 이미지 파일이라 아직 레포에 없음
-(`out/confusion.png`을 받아서 넣을 예정); 수치 원본은
-[`results/metrics.json`](results/metrics.json).
+The only two labels that slip (유상증자결정 precision 0.926, 주요사항보고서
+(전체) recall 0.913) appear to be confused with each other — likely because
+"주요사항보고서(전체)" is a catch-all lumping together many subtypes
+including capital-increase-adjacent ones, so the boundary with 유상증자결정
+blurs (an overlap that's inherent to how the label is defined).
 
-**"제목 키워드 필터"가 실제로 놓쳤을 비율** (`title_keyword_filter_miss`,
-이 프로젝트의 동기를 데이터로 뒷받침):
+Confusion matrix:
 
-| 라벨 | 전체 | 본문에 공급계약 신호 | 놓쳤을 비율 |
+![Confusion matrix on the test set](docs/confusion.png)
+
+Raw numbers: [`results/metrics.json`](results/metrics.json).
+
+**How much a "title keyword filter" would actually have missed**
+(`title_keyword_filter_miss` — the data backing this project's motivation):
+
+| Label | Total | Supply-contract signal in body | Estimated miss rate |
 |---|---:|---:|---:|
 | 기타경영사항(자율공시) | 4 | 0 | 0.0% |
 | 주요사항보고서(전체) | 23 | 4 | 17.4% |
 
-즉 "주요사항보고서(전체)"로 분류된 공시 중 17.4%는 본문에 공급계약
-성격의 내용이 있는데도, 제목만 보는 키워드 필터(`dart_alert_bot.py`
-방식)라면 완전히 놓쳤을 것들이다.
+In other words, 17.4% of filings labeled "주요사항보고서(전체)" have
+supply-contract-like content in the body, yet a title-only keyword filter
+(the `dart_alert_bot.py` approach) would have missed them entirely.
 
-**LLM 요약 비교** (전문: [`results/llm_compare.md`](results/llm_compare.md)):
-`LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct`
-는 로드까지는 됐지만 커스텀 remote code(`create_causal_mask`)가 설치된
-transformers 버전과 안 맞아 생성 단계에서 실패했고(`input_embeds` vs
-`inputs_embeds` 인자명 차이 — EXAONE 쪽 코드가 더 이전 transformers API
-기준으로 작성됨), 폴백 로직이 정상 동작해 `Qwen/Qwen2.5-1.5B-Instruct`로
-전환됐다. Qwen 로드시간 133.1초, VRAM 8.00GB(직전 EXAONE 시도의 잔여
-할당 포함 추정치라 실제 Qwen 단독 사용량보다 높게 잡혔을 수 있음),
-건당 생성시간 2.9~8.2초. 공급계약 5건 모두 계약금액ㆍ상대방ㆍ계약기간을
-합리적으로 요약했다(본문에 없는 수치를 지어내지 않음).
+**LLM summarization comparison** (full text:
+[`results/llm_compare.md`](results/llm_compare.md)):
+`LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct` loaded successfully but failed at
+the generation step because its custom remote code (`create_causal_mask`)
+doesn't match the installed transformers version (`input_embeds` vs
+`inputs_embeds` — EXAONE's code was written against an older transformers
+API); the fallback logic correctly kicked in and switched to
+`Qwen/Qwen2.5-1.5B-Instruct`. Qwen's load time was 133.1s, VRAM 8.00GB
+(likely inflated by leftover allocation from the failed EXAONE attempt,
+so probably higher than Qwen's actual standalone usage), and generation
+took 2.9–8.2s per filing. All 5 supply-contract filings were summarized
+reasonably (contract amount/counterparty/period), without fabricating
+numbers absent from the source text.
 
-### 로컬 스모크 실행 로그 (2026-09-02, MacBook Air M-series, mps)
+### Local smoke-test log (2026-09-02, MacBook Air M-series, mps)
 
-- `train.py --smoke`: train/val/test 각 32건, 1epoch, 약 6~7분(모델 최초
-  다운로드 포함 시 더 오래 걸림). `out/best_model`, `out/curves.png` 정상 저장.
-- `evaluate.py`: 정상 실행 (32건짜리 스모크 모델이라 accuracy≈0.03으로
-  낮음 — 예상된 결과, 코드 경로 확인이 목적).
-- `baseline_keyword.py`: 정상 실행. 스모크 test 150건 기준 본문 키워드
-  규칙 베이스라인 accuracy=0.393, macro_f1=0.351이었고, "주요사항보고서
-  (전체)" 라벨 23건 중 4건(17.4%)이 본문에 공급계약 신호를 갖고 있어
-  제목 키워드 필터였다면 완전히 놓쳤을 것으로 확인됨(이 프로젝트의
-  동기를 데이터로 뒷받침).
-- `predict.py`: 실제 rcept_no로 DART 원문을 크롤링해 top-3 라벨 확률 출력
-  정상 동작 확인.
-- `llm_compare.py`: 구문 검사·import만 확인(2.4B 모델 다운로드는 로컬
-  디스크/시간 제약으로 스킵 — Colab에서 실행 권장).
+- `train.py --smoke`: 32 examples each for train/val/test, 1 epoch, ~6-7
+  minutes (longer if it has to download the model first). `out/best_model`
+  and `out/curves.png` saved correctly.
+- `evaluate.py`: ran cleanly (accuracy≈0.03 since the smoke model only saw
+  32 examples — expected, the point was just to verify the code path).
+- `baseline_keyword.py`: ran cleanly. On the smoke run's 150 test
+  examples, the body-keyword rule baseline scored accuracy=0.393,
+  macro_f1=0.351, and 4 of 23 "주요사항보고서(전체)"-labeled filings (17.4%)
+  had supply-contract signal in the body — confirming a title-only keyword
+  filter would have missed them entirely (the data backing this project's
+  motivation).
+- `predict.py`: confirmed working end-to-end — crawls a real filing body
+  by `rcept_no` and prints the top-3 label probabilities.
+- `llm_compare.py`: syntax/import-checked only (skipped the actual 2.4B
+  model download locally due to disk/time constraints — run on Colab
+  instead).
