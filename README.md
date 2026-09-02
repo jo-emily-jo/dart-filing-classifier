@@ -165,15 +165,59 @@ python baseline_keyword.py
 python predict.py <rcept_no>
 ```
 
-### 결과 (TBD — Colab 정식 학습 후 채울 것)
+### 결과 (2026-09-02, Colab T4, `train.py --fp16 --epochs 3 --out out`)
 
-| 모델 | GPU | 학습시간 | macro-F1 | 키워드 베이스라인 macro-F1 |
-|---|---|---:|---:|---:|
-| klue/roberta-base | T4 | - | - | - |
+| 모델 | GPU | 학습시간 | test accuracy | test macro-F1 | 키워드 베이스라인 macro-F1 |
+|---|---|---:|---:|---:|---:|
+| klue/roberta-base | T4 | 122.6초 (3epoch) | 0.9867 | 0.9895 | 0.3511 |
 
-- 라벨별 precision/recall, confusion matrix: `out/metrics.json`, `out/confusion.png`
-- "제목 키워드 필터가 놓쳤을 비율": `out/metrics.json`의 `title_keyword_filter_miss`
-- LLM 요약 비교(로드시간/VRAM/생성시간): `out/llm_compare.md`
+키워드 베이스라인(제목용 키워드 7종을 본문에 적용)은 accuracy 0.3933,
+macro-F1 0.3511로 파인튜닝 모델과 큰 격차가 난다 — test 150건 중 67건만
+매칭됐다(나머지는 애초에 판단 불가).
+
+라벨별 precision/recall/f1 (test, n=150):
+
+| 라벨 | precision | recall | f1 | support |
+|---|---:|---:|---:|---:|
+| 단일판매ㆍ공급계약체결 | 1.000 | 1.000 | 1.000 | 25 |
+| 유상증자결정 | 0.926 | 1.000 | 0.962 | 25 |
+| 타법인주식및출자증권취득결정 | 1.000 | 1.000 | 1.000 | 25 |
+| 신규시설투자등 | 1.000 | 1.000 | 1.000 | 10 |
+| 자기주식취득결정 | 1.000 | 1.000 | 1.000 | 13 |
+| 주요사항보고서(전체) | 1.000 | 0.913 | 0.955 | 23 |
+| 기타경영사항(자율공시) | 1.000 | 1.000 | 1.000 | 4 |
+| 주식등의대량보유상황보고서 | 1.000 | 1.000 | 1.000 | 25 |
+
+유일하게 밀리는 두 라벨(유상증자결정 precision 0.926, 주요사항보고서
+(전체) recall 0.913)은 서로 헷갈린 것으로 보인다 — "주요사항보고서(전체)"
+가 유상증자결정을 포함해 다양한 하위유형을 뭉친 catch-all이라 일부
+유상증자 관련 문서와 경계가 흐릿한 게 원인으로 추정된다(라벨 정의상
+불가피한 중첩). confusion matrix는 이미지 파일이라 아직 레포에 없음
+(`out/confusion.png`을 받아서 넣을 예정); 수치 원본은
+[`results/metrics.json`](results/metrics.json).
+
+**"제목 키워드 필터"가 실제로 놓쳤을 비율** (`title_keyword_filter_miss`,
+이 프로젝트의 동기를 데이터로 뒷받침):
+
+| 라벨 | 전체 | 본문에 공급계약 신호 | 놓쳤을 비율 |
+|---|---:|---:|---:|
+| 기타경영사항(자율공시) | 4 | 0 | 0.0% |
+| 주요사항보고서(전체) | 23 | 4 | 17.4% |
+
+즉 "주요사항보고서(전체)"로 분류된 공시 중 17.4%는 본문에 공급계약
+성격의 내용이 있는데도, 제목만 보는 키워드 필터(`dart_alert_bot.py`
+방식)라면 완전히 놓쳤을 것들이다.
+
+**LLM 요약 비교** (전문: [`results/llm_compare.md`](results/llm_compare.md)):
+`LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct`
+는 로드까지는 됐지만 커스텀 remote code(`create_causal_mask`)가 설치된
+transformers 버전과 안 맞아 생성 단계에서 실패했고(`input_embeds` vs
+`inputs_embeds` 인자명 차이 — EXAONE 쪽 코드가 더 이전 transformers API
+기준으로 작성됨), 폴백 로직이 정상 동작해 `Qwen/Qwen2.5-1.5B-Instruct`로
+전환됐다. Qwen 로드시간 133.1초, VRAM 8.00GB(직전 EXAONE 시도의 잔여
+할당 포함 추정치라 실제 Qwen 단독 사용량보다 높게 잡혔을 수 있음),
+건당 생성시간 2.9~8.2초. 공급계약 5건 모두 계약금액ㆍ상대방ㆍ계약기간을
+합리적으로 요약했다(본문에 없는 수치를 지어내지 않음).
 
 ### 로컬 스모크 실행 로그 (2026-09-02, MacBook Air M-series, mps)
 

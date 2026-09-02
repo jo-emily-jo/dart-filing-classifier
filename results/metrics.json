@@ -1,0 +1,76 @@
+{
+  "model": {
+    "model_dir": "out/best_model",
+    "accuracy": 0.9866666666666667,
+    "macro_f1": 0.9895104895104896,
+    "per_label": {
+      "단일판매ㆍ공급계약체결": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 25
+      },
+      "유상증자결정": {
+        "precision": 0.9259259259259259,
+        "recall": 1.0,
+        "f1": 0.9615384615384616,
+        "support": 25
+      },
+      "타법인주식및출자증권취득결정": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 25
+      },
+      "신규시설투자등": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 10
+      },
+      "자기주식취득결정": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 13
+      },
+      "주요사항보고서(전체)": {
+        "precision": 1.0,
+        "recall": 0.9130434782608695,
+        "f1": 0.9545454545454546,
+        "support": 23
+      },
+      "기타경영사항(자율공시)": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 4
+      },
+      "주식등의대량보유상황보고서": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 25
+      }
+    },
+    "n_test": 150
+  },
+  "keyword_baseline": {
+    "accuracy": 0.3933333333333333,
+    "macro_f1": 0.3511457214464733,
+    "n_match": 67,
+    "n_total": 150
+  },
+  "title_keyword_filter_miss": {
+    "기타경영사항(자율공시)": {
+      "n_total": 4,
+      "n_supply_contract_signal_in_body": 0,
+      "ratio": 0.0
+    },
+    "주요사항보고서(전체)": {
+      "n_total": 23,
+      "n_supply_contract_signal_in_body": 4,
+      "ratio": 0.17391304347826086
+    }
+  }
+}

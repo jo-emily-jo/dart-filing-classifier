@@ -1,0 +1,10 @@
+{
+  "model": "klue/roberta-base",
+  "epochs": 3,
+  "lr": 2e-05,
+  "batch": 16,
+  "fp16": true,
+  "smoke": false,
+  "device": "cuda",
+  "train_seconds": 122.58126831054688
+}
